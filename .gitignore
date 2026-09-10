@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Vector store (rebuilt automatically on first run)
+.chroma/
+.cache/
+
+# Model cache
+.fastembed_cache/
+local_cache/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Streamlit local secrets
+.streamlit/secrets.toml
+
+# Local editor/tooling config
+.claude/
