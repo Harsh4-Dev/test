@@ -130,7 +130,7 @@ with st.sidebar:
 # Layout — retrieved chunks take the main column, the chat sits beside it
 # ---------------------------------------------------------------------------
 
-report_col, chat_col = st.columns([1.75, 1], gap="large")
+report_col, chat_col = st.columns([2.45, 1], gap="large")
 
 
 # ---------------------------------------------------------------------------

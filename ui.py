@@ -46,7 +46,12 @@ CSS = """
 /* Streamlit's header is absolutely positioned and 60px tall, and the main
    area scrolls underneath it. Without this clearance the page title and the
    top of the report sit behind it when scrolled all the way up. */
-.block-container{ padding-top:4.5rem; padding-bottom:7rem; max-width:1560px; }
+/* No max-width: the two columns should take whatever room there is, so
+   collapsing the sidebar actually widens the report instead of just
+   re-centring a capped block. */
+[data-testid="stMainBlockContainer"]{
+  padding-top:4.5rem; padding-bottom:7rem; max-width:none;
+}
 /* Note: do NOT widen this to [class*="st-"] - that selector also hits
    Streamlit's icon spans and replaces the Material Symbols font, which makes
    every icon render as its literal ligature name. */
@@ -376,8 +381,8 @@ div[data-testid="stExpander"] summary{ font-size:.78rem; font-weight:550; }
 [data-testid="stChatInput"]:focus-within{ border-color:var(--blue-500); }
 
 @media (min-width:1200px){
-  /* The report column is 1.75 of 2.75, so the chat starts at ~64%. */
-  [data-testid="stBottomBlockContainer"] > div{ padding-left:64%; }
+  /* The report column is 2.45 of 3.45, so the chat starts at ~71%. */
+  [data-testid="stBottomBlockContainer"] > div{ padding-left:72.5%; }
 
   /* Both columns scroll on their own, so the page itself is never taller than
      the viewport. That matters because Streamlit auto-scrolls the app to the
@@ -405,7 +410,7 @@ div[data-testid="stExpander"] summary{ font-size:.78rem; font-weight:550; }
   }
   /* The columns reserve their own room for the chat bar, so the page below
      them needs almost none - this is what stops the app scrolling at all. */
-  .block-container{ padding-bottom:1.5rem; }
+  [data-testid="stMainBlockContainer"]{ padding-bottom:1.5rem; }
 }
 </style>
 """
