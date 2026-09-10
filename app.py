@@ -1,33 +1,34 @@
-"""POLIVY Brand Book — retrieval explorer.
+"""RAG Retrieval — a retrieval explorer for any chunked JSONL corpus.
 
-A single-page Streamlit app over a Chroma index of the brand book. There is no
-LLM in the loop: you ask, it retrieves, reranks and shows you the evidence with
-the scores that justify it.
+A single-page Streamlit app over a Chroma index. There is no LLM in the loop:
+you ask, it retrieves, reranks and shows you the evidence with the scores that
+justify it.
+
+Point it at any .jsonl in dataset/ - the schema is discovered per file.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
 import ui
-from rag_core import EMBED_MODEL, RERANK_MODEL, RagEngine
+from rag_core import (
+    DATASET_DIR,
+    EMBED_MODEL,
+    RERANK_MODEL,
+    RagEngine,
+    list_datasets,
+)
 
 st.set_page_config(
-    page_title="Brand Book Retrieval",
+    page_title="RAG Retrieval",
     page_icon=":material/search:",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 st.markdown(ui.CSS, unsafe_allow_html=True)
-
-SAMPLE_QUERIES = [
-    "Minimum clear space around the logo",
-    "Peripheral neuropathy safety data",
-    "Primary colour palette and hex codes",
-    "Typography hierarchy for digital",
-    "Droplet supergraphic cropping rules",
-    "How do I build a chart?",
-]
 
 
 # ---------------------------------------------------------------------------
@@ -35,8 +36,9 @@ SAMPLE_QUERIES = [
 # ---------------------------------------------------------------------------
 
 @st.cache_resource(show_spinner=False)
-def get_engine() -> RagEngine:
-    return RagEngine()
+def get_engine(dataset_path: str) -> RagEngine:
+    """One engine per dataset file, cached across reruns."""
+    return RagEngine(dataset_path)
 
 
 def init_state():
@@ -49,9 +51,28 @@ def init_state():
 
 init_state()
 
-with st.spinner("Loading embedding model and building the vector index…"):
-    engine = get_engine()
+DATASETS = list_datasets()
+if not DATASETS:
+    st.error(
+        f"No `.jsonl` corpus found in `{DATASET_DIR}`. "
+        "Drop one in and reload — every line needs a text field "
+        "(`chunk_text`, `text`, `content`, `body`, `passage` or `page_content`)."
+    )
+    st.stop()
+
+st.session_state.setdefault("dataset", str(DATASETS[0]))
+if st.session_state.dataset not in {str(p) for p in DATASETS}:
+    st.session_state.dataset = str(DATASETS[0])
+
+try:
+    with st.spinner("Loading the embedding model and building the vector index…"):
+        engine = get_engine(st.session_state.dataset)
+except Exception as exc:  # a malformed corpus should explain itself, not 500
+    st.error(f"Could not load **{st.session_state.dataset}**\n\n{exc}")
+    st.stop()
+
 stats = engine.stats()
+SAMPLE_QUERIES = engine.suggested_queries()
 
 
 # ---------------------------------------------------------------------------
@@ -60,9 +81,9 @@ stats = engine.stats()
 
 def render_sidebar():
     st.markdown(
-        '<div class="sb-brand"><div class="sb-mark">RB</div>'
-        '<div><div class="sb-title">Brand Book Retrieval</div>'
-        '<div class="sb-sub">Hybrid RAG · no LLM</div></div></div>',
+        '<div class="sb-brand"><div class="sb-mark">RAG</div>'
+        '<div><div class="sb-title">RAG Retrieval</div>'
+        '<div class="sb-sub">Hybrid search · no LLM</div></div></div>',
         unsafe_allow_html=True,
     )
 
@@ -82,10 +103,28 @@ def render_sidebar():
         st.rerun()
 
     st.markdown('<div class="sb-label">Database</div>', unsafe_allow_html=True)
+
+    if len(DATASETS) > 1:
+        names = [p.name for p in DATASETS]
+        current = names.index(Path(st.session_state.dataset).name)
+        chosen = st.selectbox("Corpus", names, index=current,
+                              label_visibility="collapsed")
+        if chosen != names[current]:
+            st.session_state.dataset = str(DATASETS[names.index(chosen)])
+            st.session_state.messages = []
+            st.session_state.results = []
+            st.session_state.viewing = None
+            st.session_state.panel = "controls"
+            st.rerun()
+
+    scope = (
+        f'{stats["pages"]} pages indexed' if stats["pages"]
+        else f'{stats["words"]:,} words indexed'
+    )
     st.markdown(
         f'<div class="db-card">'
-        f'<div class="db-name">POLIVY Global Brand Book</div>'
-        f'<div class="db-meta">Q1 2026 · {stats["pages"]} pages indexed</div>'
+        f'<div class="db-name">{ui.esc(stats["name"])}</div>'
+        f'<div class="db-meta">{ui.esc(stats["file"])} · {scope}</div>'
         f'<div class="db-grid">'
         f'<div class="db-cell"><b>{stats["sections"]}</b><span>chunks</span></div>'
         f'<div class="db-cell"><b>{stats["passages"]}</b><span>passages</span></div>'
@@ -116,7 +155,8 @@ def render_sidebar():
             "- **BM25** — lexical score, normalised across candidates\n"
             "- **Fusion** — reciprocal-rank fusion of vector + BM25\n\n"
             "These are retrieval confidence signals. There are no ground-truth "
-            "labels for this corpus, so nothing here is a measured accuracy."
+            "relevance labels for this corpus, so nothing here is a measured "
+            "accuracy — use them to tell a confident hit from a guess."
         )
 
 
@@ -190,7 +230,7 @@ def render_report():
         return
     result = st.session_state.results[idx]
 
-    head_l, head_r = st.columns([3, 1])
+    head_l, head_r = st.columns([2, 1])
     with head_l:
         st.markdown(
             f'<div class="panel-head"><div class="t">Retrieved evidence</div>'
@@ -265,8 +305,9 @@ def answer_summary_html(result) -> str:
     items = "".join(
         f'<li><span class="res-n">{h.rank}</span>'
         f'<span class="res-t">{ui.esc(h.section.section_label)}</span>'
-        f'<span class="res-p">{ui.esc(h.section.page_label)}</span>'
-        f'<span class="res-s">{ui.pct(h.relevance)}</span></li>'
+        + (f'<span class="res-p">{ui.esc(h.section.page_label)}</span>'
+           if h.section.page_label else "")
+        + f'<span class="res-s">{ui.pct(h.relevance)}</span></li>'
         for h in result.hits
     )
     return (
@@ -349,7 +390,7 @@ def run_query(query: str):
 
 with chat_col:
     st.markdown(
-        '<div class="page-head"><div class="t">Brand Book Retrieval</div>'
+        '<div class="page-head"><div class="t">RAG Retrieval</div>'
         '<span class="tag">retrieval only</span></div>'
         '<p class="page-sub">Hybrid vector + keyword search with cross-encoder '
         "reranking. Answers are the source passages themselves — nothing is "
@@ -359,9 +400,10 @@ with chat_col:
 
     if not st.session_state.messages and not st.session_state.pending:
         st.markdown(
-            '<div class="empty"><span class="ic">◆</span><b>Ask the brand book something</b>'
-            "Logo rules, colour palette, typography, campaign artwork, safety and "
-            "efficacy data — all 36 chunks are indexed.</div>",
+            f'<div class="empty"><span class="ic">◆</span>'
+            f'<b>Ask {ui.esc(stats["name"])} something</b>'
+            f'{stats["sections"]} chunks are indexed as {stats["passages"]} passages. '
+            f'Pick a suggestion on the left, or type a question below.</div>',
             unsafe_allow_html=True,
         )
 
@@ -381,7 +423,7 @@ with panel_col:
     else:
         render_controls()
 
-typed = st.chat_input("Ask about the brand book…")
+typed = st.chat_input("Ask your documents…")
 if typed:
     st.session_state.pending = typed
     st.rerun()

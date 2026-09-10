@@ -42,7 +42,10 @@ CSS = """
 /* ---------- shell ---------- */
 .stApp{ background:var(--white); }
 #MainMenu, footer, header [data-testid="stStatusWidget"]{ visibility:hidden; }
-.block-container{ padding-top:1.4rem; padding-bottom:7rem; max-width:1560px; }
+/* Streamlit's header is absolutely positioned and 60px tall, and the main
+   area scrolls underneath it. Without this clearance the page title and the
+   top of the report sit behind it when scrolled all the way up. */
+.block-container{ padding-top:4.5rem; padding-bottom:7rem; max-width:1560px; }
 /* Note: do NOT widen this to [class*="st-"] - that selector also hits
    Streamlit's icon spans and replaces the Material Symbols font, which makes
    every icon render as its literal ligature name. */
@@ -295,10 +298,12 @@ div[data-testid="stExpander"] summary{ font-size:.78rem; font-weight:550; }
 
 @media (min-width:1200px){
   [data-testid="stBottomBlockContainer"] > div{ padding-right:41%; }
-  /* pin the report column so long chunk lists scroll on their own */
+  /* Pin the report column so long chunk lists scroll on their own. `top`
+     clears the 60px app header, otherwise the panel heading and the summary
+     metrics hide behind it at scroll top. */
   div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child{
-    align-self:flex-start; position:sticky; top:.5rem;
-    max-height:calc(100vh - 2rem); overflow-y:auto; overflow-x:hidden;
+    align-self:flex-start; position:sticky; top:4.5rem;
+    max-height:calc(100vh - 6.5rem); overflow-y:auto; overflow-x:hidden;
     padding-right:.35rem;
   }
   div[data-testid="stColumn"]:last-child::-webkit-scrollbar{ width:7px; }
@@ -743,7 +748,9 @@ def chunk_card_html(hit) -> str:
     sec = hit.section
     terms = hit.matched_terms
 
-    chips = [f'<span class="chip">{esc(sec.page_label)}</span>']
+    chips = []
+    if sec.page_label:
+        chips.append(f'<span class="chip">{esc(sec.page_label)}</span>')
     if sec.tables:
         chips.append(f'<span class="chip n">{len(sec.tables)} table(s)</span>')
     if sec.images:

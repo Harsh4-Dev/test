@@ -54,7 +54,7 @@ The repo is already initialised. Streamlit Community Cloud deploys from
 GitHub, so you need it there.
 
 ```bash
-git add -A && git commit -m "Brand book retrieval UI"
+git add -A && git commit -m "RAG retrieval UI"
 ```
 
 Create an **empty** repo on GitHub (no README, no .gitignore), then:
@@ -74,7 +74,7 @@ plan.
 
 - `app.py`, `rag_core.py`, `ui.py`
 - `requirements.txt`
-- `dataset/phase4_ready_sections.jsonl`
+- everything in `dataset/` you want available in the deployed app
 - `.streamlit/config.toml`
 
 `.chroma/` is gitignored on purpose. The cloud container rebuilds it on first
@@ -185,10 +185,21 @@ and the fusion weight are all live in the app's right-hand control panel.
 
 ### Use a different dataset
 
-Drop another JSONL in `dataset/` and point `DATASET_PATH` at it. Each line
-needs at least `chunk_id`, `chunk_text` and `section_label`; `tables`,
-`images`, `color_swatches`, `matched_fields` and the page fields are optional
-and simply won't render if absent.
+Drop another `.jsonl` into `dataset/` — no code change needed. Every file
+there is listed in the sidebar's corpus picker, and each keeps its own Chroma
+collection, so switching between them does not force a rebuild.
+
+Only the text is required. It is read from the first present of `chunk_text`,
+`text`, `content`, `body`, `passage` or `page_content`. Titles, ids, document
+names and page numbers each have their own list of accepted keys and fall back
+to sensible defaults; see the field table in [README.md](README.md#any-dataset).
+Blank lines, malformed JSON and text-less rows are skipped rather than fatal.
+
+Confirm it before deploying:
+
+```bash
+python verify_datasets.py
+```
 
 ---
 
@@ -204,8 +215,12 @@ you haven't switched to `BAAI/bge-reranker-base` or pulled in torch.
 **First load times out** — reload the page. The models are downloading; the
 second attempt hits a warm cache.
 
-**Stale or wrong results after editing the dataset** — delete `.chroma/` and
-restart. Normally the fingerprint catches this automatically.
+**Stale or wrong results after editing a dataset** — delete `.chroma/` and
+restart. Normally the per-collection fingerprint catches this automatically.
+
+**A corpus won't load** — the app names the reason on screen. The usual cause
+is that no line carries a recognised text key. Run `python verify_datasets.py`
+to see it from the terminal.
 
 **Icons render as words like `keyboard_arrow_right`** — a CSS `font-family`
 rule is overriding Streamlit's Material Symbols font. Keep the font rule in

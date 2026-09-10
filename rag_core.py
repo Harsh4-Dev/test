@@ -1,4 +1,4 @@
-"""Retrieval core for the POLIVY brand-book RAG explorer.
+"""Retrieval core for the RAG Retrieval explorer.
 
 Pipeline: sections -> passages -> (dense via Chroma + BM25) -> RRF fusion
 -> cross-encoder rerank -> parent-section rollup -> metrics.
@@ -31,9 +31,38 @@ from typing import Any, Iterable
 import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DATASET_PATH = PROJECT_ROOT / "dataset" / "phase4_ready_sections.jsonl"
+DATASET_DIR = PROJECT_ROOT / "dataset"
 PERSIST_DIR = PROJECT_ROOT / ".chroma"
-COLLECTION = "polivy_sections"
+
+
+def list_datasets(directory: Path = DATASET_DIR) -> list:
+    """Every .jsonl corpus sitting in the dataset folder, newest name first."""
+    if not directory.is_dir():
+        return []
+    return sorted(directory.glob("*.jsonl"), key=lambda p: p.name.lower())
+
+
+def default_dataset(directory: Path = DATASET_DIR):
+    found = list_datasets(directory)
+    return found[0] if found else None
+
+
+def collection_name(path: Path) -> str:
+    """A Chroma-safe collection name derived from the file name.
+
+    Each dataset gets its own collection so switching between them in the UI
+    never mixes vectors or forces a rebuild.
+    """
+    slug = re.sub(r"[^a-z0-9_-]+", "_", path.stem.lower()).strip("_-")
+    slug = (slug or "corpus")[:48]
+    if len(slug) < 3:
+        slug = f"ds_{slug}"
+    if not slug[0].isalnum():
+        slug = f"d{slug}"
+    return slug
+
+
+DATASET_PATH = default_dataset()
 
 # --- Models -----------------------------------------------------------------
 # Both run on onnxruntime through fastembed, so torch is never installed. That
@@ -118,7 +147,14 @@ class Section:
     raw: dict = field(repr=False, default_factory=dict)
 
     @property
+    def has_pages(self) -> bool:
+        """Plenty of corpora carry no page numbers at all."""
+        return bool(self.source_pages) or self.page_start > 0
+
+    @property
     def page_label(self) -> str:
+        if not self.has_pages:
+            return ""
         if self.page_start == self.page_end:
             return f"p. {self.page_start}"
         return f"pp. {self.page_start}-{self.page_end}"
@@ -176,32 +212,100 @@ class RetrievalResult:
 # Loading + windowing
 # ---------------------------------------------------------------------------
 
+# Field aliases, so a JSONL written by a different pipeline still loads. Only
+# the chunk text is mandatory; everything else degrades to a sensible default.
+_TEXT_KEYS = ("chunk_text", "text", "content", "body", "passage", "page_content")
+_LABEL_KEYS = ("section_label", "title", "heading", "section", "name", "header")
+_DOC_KEYS = ("document_id", "doc_id", "source", "document", "file_name", "filename")
+_ID_KEYS = ("chunk_id", "id", "_id", "uuid", "chunkId")
+
+# Labels this module invented because the record had no title of its own.
+_PLACEHOLDER_LABEL = re.compile(r"^Section \d+$")
+
+
+def _first(record: dict, keys, default=""):
+    for key in keys:
+        value = record.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if value not in (None, "", [], {}) and not isinstance(value, str):
+            return value
+    return default
+
+
+def _as_int(value, default=0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    if value in (None, "", {}):
+        return []
+    return [value]
+
+
 def load_sections(path: Path = DATASET_PATH) -> list:
+    """Read a JSONL corpus into Section objects.
+
+    Lines that are unparseable or carry no text are skipped rather than
+    aborting the load, so one bad row cannot take the whole app down.
+    """
+    if path is None:
+        return []
+
     sections = []
     with open(path, "r", encoding="utf-8") as fh:
-        for line in fh:
+        for lineno, line in enumerate(fh, start=1):
             line = line.strip()
             if not line:
                 continue
-            r = json.loads(line)
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(r, dict):
+                continue
+
+            text = clean_text(str(_first(r, _TEXT_KEYS, "")))
+            label = str(_first(r, _LABEL_KEYS, "")) or f"Section {lineno}"
+            if not text.strip() and not label.strip():
+                continue
+
+            pages = [p for p in _as_list(r.get("source_pages")) if isinstance(p, int)]
+            page_start = _as_int(r.get("page_start"), pages[0] if pages else 0)
+            page_end = _as_int(r.get("page_end"), pages[-1] if pages else page_start)
+
             sections.append(
                 Section(
-                    chunk_id=r["chunk_id"],
-                    document_id=r.get("document_id", ""),
-                    section_label=(r.get("section_label") or "").strip() or "Untitled section",
-                    page_start=int(r.get("page_start", 0)),
-                    page_end=int(r.get("page_end", 0)),
-                    source_pages=r.get("source_pages") or [],
-                    matched_fields=r.get("matched_fields") or [],
-                    field_match_details=r.get("field_match_details") or [],
-                    text=clean_text(r.get("chunk_text", "")),
-                    tables=r.get("tables") or [],
-                    images=r.get("images") or [],
-                    color_swatches=r.get("color_swatches") or [],
-                    fonts_present=r.get("fonts_present") or [],
+                    chunk_id=str(_first(r, _ID_KEYS, f"{path.stem}_{lineno}")),
+                    document_id=str(_first(r, _DOC_KEYS, path.stem)),
+                    section_label=label,
+                    page_start=page_start,
+                    page_end=page_end,
+                    source_pages=pages,
+                    matched_fields=[
+                        str(f) for f in _as_list(r.get("matched_fields")) if f
+                    ],
+                    field_match_details=_as_list(r.get("field_match_details")),
+                    text=text,
+                    tables=[t for t in _as_list(r.get("tables")) if isinstance(t, dict)],
+                    images=[i for i in _as_list(r.get("images")) if isinstance(i, dict)],
+                    color_swatches=_as_list(r.get("color_swatches")),
+                    fonts_present=[str(f) for f in _as_list(r.get("fonts_present")) if f],
                     raw=r,
                 )
             )
+
+    # Duplicate ids would silently overwrite each other in Chroma.
+    seen = {}
+    for sec in sections:
+        seen[sec.chunk_id] = seen.get(sec.chunk_id, 0) + 1
+        if seen[sec.chunk_id] > 1:
+            sec.chunk_id = f"{sec.chunk_id}__{seen[sec.chunk_id]}"
     return sections
 
 
@@ -304,8 +408,19 @@ class RagEngine:
         import chromadb
         from chromadb.config import Settings
 
-        self.dataset_path = dataset_path
-        self.sections = load_sections(dataset_path)
+        if dataset_path is None:
+            raise FileNotFoundError(
+                f"No .jsonl corpus found in {DATASET_DIR}. Drop one in and reload."
+            )
+
+        self.dataset_path = Path(dataset_path)
+        self.collection_name = collection_name(self.dataset_path)
+        self.sections = load_sections(self.dataset_path)
+        if not self.sections:
+            raise ValueError(
+                f"{self.dataset_path.name} has no usable records. Each line needs "
+                f"text under one of: {', '.join(_TEXT_KEYS)}."
+            )
         self.by_id = {s.chunk_id: s for s in self.sections}
         self.passages = build_passages(self.sections)
         self.passage_by_id = {p.passage_id: p for p in self.passages}
@@ -326,27 +441,30 @@ class RagEngine:
 
     # -- index -------------------------------------------------------------
     def _ensure_collection(self, persist_dir: Path):
+        name = self.collection_name
         fingerprint = dataset_fingerprint(self.dataset_path)
         stamp_file = persist_dir / "build.json"
         stamp = {}
         if stamp_file.exists():
             try:
-                stamp = json.loads(stamp_file.read_text(encoding="utf-8"))
+                loaded = json.loads(stamp_file.read_text(encoding="utf-8"))
+                stamp = loaded if isinstance(loaded, dict) else {}
             except Exception:
                 stamp = {}
 
         existing = _collection_names(self.client)
+        recorded = stamp.get(name, {}) if isinstance(stamp.get(name), dict) else {}
 
-        if stamp.get("fingerprint") == fingerprint and COLLECTION in existing:
-            col = self.client.get_collection(COLLECTION)
+        if recorded.get("fingerprint") == fingerprint and name in existing:
+            col = self.client.get_collection(name)
             if col.count() == len(self.passages):
                 return col
-            self.client.delete_collection(COLLECTION)
-        elif COLLECTION in existing:
-            self.client.delete_collection(COLLECTION)
+            self.client.delete_collection(name)
+        elif name in existing:
+            self.client.delete_collection(name)
 
         col = self.client.create_collection(
-            name=COLLECTION, metadata={"hnsw:space": "cosine"}
+            name=name, metadata={"hnsw:space": "cosine"}
         )
         vectors = list(self.embedder.embed([p.text for p in self.passages]))
         col.add(
@@ -365,23 +483,59 @@ class RagEngine:
                 for p in self.passages
             ],
         )
-        stamp_file.write_text(
-            json.dumps({"fingerprint": fingerprint, "passages": len(self.passages)}),
-            encoding="utf-8",
-        )
+        stamp[name] = {"fingerprint": fingerprint, "passages": len(self.passages)}
+        stamp_file.write_text(json.dumps(stamp, indent=1), encoding="utf-8")
         self.built_fresh = True
         return col
 
     # -- stats -------------------------------------------------------------
+    def corpus_name(self) -> str:
+        """A readable title for the corpus, whatever the dataset looks like."""
+        docs = {s.document_id for s in self.sections if s.document_id}
+        if len(docs) == 1:
+            raw = docs.pop()
+        else:
+            raw = self.dataset_path.stem
+        pretty = re.sub(r"[_\-]+", " ", str(raw)).strip()
+        pretty = re.sub(r"\s+", " ", pretty)
+        return pretty.title() if pretty.islower() or pretty.isupper() else pretty
+
+    def suggested_queries(self, limit: int = 6) -> list:
+        """Seed the UI with real headings from whichever corpus loaded.
+
+        Corpora with no titles get a placeholder label ("Section 4"), which
+        makes a useless suggestion, so those fall back to an opening phrase
+        from the chunk itself.
+        """
+        seen, out = set(), []
+        for sec in sorted(self.sections, key=lambda s: -s.word_count):
+            label = sec.section_label.strip()
+            if _PLACEHOLDER_LABEL.match(label):
+                words = sec.text.split()[:7]
+                label = " ".join(words).rstrip(".,;:")
+            if not (6 <= len(label) <= 52):
+                continue
+            key = label.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(label)
+            if len(out) >= limit:
+                break
+        return out
+
     def stats(self) -> dict:
+        pages = {p for s in self.sections for p in (s.source_pages or [])}
         return {
-            "documents": len({s.document_id for s in self.sections}),
+            "name": self.corpus_name(),
+            "file": self.dataset_path.name,
+            "documents": len({s.document_id for s in self.sections if s.document_id}),
             "sections": len(self.sections),
             "passages": len(self.passages),
             "tables": sum(len(s.tables) for s in self.sections),
             "images": sum(len(s.images) for s in self.sections),
             "words": sum(s.word_count for s in self.sections),
-            "pages": len({p for s in self.sections for p in (s.source_pages or [])}),
+            "pages": len(pages),
             "embed_model": EMBED_MODEL,
             "rerank_model": RERANK_MODEL,
             "dim": 384,

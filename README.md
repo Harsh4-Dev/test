@@ -1,6 +1,6 @@
-# Brand Book Retrieval
+# RAG Retrieval
 
-A single-page Streamlit app that searches a chunked PDF corpus and shows you
+A single-page Streamlit app that searches a chunked JSONL corpus and shows you
 the evidence it found, with the scores that justify each result.
 
 There is **no LLM in the loop.** Nothing is generated or summarised — the
@@ -25,6 +25,40 @@ query ─► bge-small embedding ─┬─► Chroma (cosine, HNSW) ─┐
   tables as real tables, its figures as framed thumbnails, its colour swatches
   as chips, and its retrieval metrics underneath.
 
+## Any dataset
+
+Drop any `.jsonl` into `dataset/`. Every file there appears in the sidebar's
+corpus picker, each gets its own Chroma collection, and the corpus title,
+statistics and suggested queries are all derived from whatever loaded — there
+is nothing corpus-specific in the code.
+
+**The only required field is the text.** It is read from the first of these
+keys that is present:
+
+| Field | Accepted keys | Missing? |
+|---|---|---|
+| text | `chunk_text`, `text`, `content`, `body`, `passage`, `page_content` | row is skipped |
+| title | `section_label`, `title`, `heading`, `section`, `name`, `header` | `Section <n>` |
+| id | `chunk_id`, `id`, `_id`, `uuid`, `chunkId` | generated from file + line |
+| document | `document_id`, `doc_id`, `source`, `document`, `file_name`, `filename` | the file stem |
+| pages | `page_start`, `page_end`, `source_pages` | page labels are hidden |
+| extras | `tables`, `images`, `color_swatches`, `matched_fields`, `fonts_present` | simply not rendered |
+
+Blank lines, malformed JSON and rows with no text are skipped rather than
+aborting the load, and duplicate ids are suffixed so they cannot overwrite
+each other in the vector store.
+
+To check this on your own data:
+
+```bash
+python verify_datasets.py
+```
+
+It builds several deliberately mismatched corpora in a temp directory — a
+LangChain-style `page_content`/`title` export, a bare `text`-only file, and one
+with duplicate ids plus a corrupt line — runs each through the real engine, and
+then does the same for everything in `dataset/`. Non-zero exit on any failure.
+
 ## Scoring
 
 The headline **relevance** is a composite, not a single model output:
@@ -41,7 +75,7 @@ relevance = signal × substance
 | `term coverage` | fraction of the query's content words present in the section |
 | `substance` | 0.4–1.0, scaling down sections that are near-empty divider pages |
 
-**Why a blend and not just the reranker.** On this corpus the reranker
+**Why a blend and not just the reranker.** On the bundled corpus the reranker
 occasionally buries a section that both the vector search and keyword overlap
 agree on, and a plain sigmoid over its logits pins almost everything to 0.0 or
 1.0 — useless to read off a dashboard. The blend keeps the reranker dominant
@@ -51,9 +85,10 @@ the composite is never a black box.
 Query-level metrics — top relevance, mean, score margin, retriever agreement,
 term coverage, latency, passages scored — sit at the top of the report.
 
-> These are **retrieval confidence signals, not measured accuracy.** This
-> corpus has no ground-truth relevance labels, so nothing here is a precision
-> or recall figure. Treat them as a way to tell a confident hit from a guess.
+> These are **retrieval confidence signals, not measured accuracy.** There
+> are no ground-truth relevance labels for these corpora, so nothing here is a
+> precision or recall figure. Treat them as a way to tell a confident hit from
+> a guess.
 
 ## Stack
 
@@ -73,7 +108,8 @@ term coverage, latency, passages scored — sit at the top of the report.
 | `app.py` | Streamlit page: sidebar, chat column, right-hand panel |
 | `rag_core.py` | loading, passage windowing, Chroma index, retrieval, scoring |
 | `ui.py` | theme CSS and the HTML for a rendered chunk |
-| `dataset/phase4_ready_sections.jsonl` | the corpus (36 chunks) |
+| `dataset/*.jsonl` | your corpora - every file here shows up in the app |
+| `verify_datasets.py` | proves the pipeline works on unfamiliar schemas |
 | `SETUP.md` | local setup and Streamlit Community Cloud deployment |
 
 ## Run it
@@ -90,8 +126,9 @@ Full instructions, including free-tier deployment, are in [SETUP.md](SETUP.md).
 
 ## Figures
 
-The dataset references extracted images by relative path
-(`extracted_images/<doc>/<page>/<file>.png`). Those files are **not** part of
-this repo, so figures render as labelled placeholders showing the page number,
-classification and filename. Drop the `extracted_images/` folder into the
-project root and they render inline — see SETUP.md.
+A corpus can reference extracted images by relative path
+(`extracted_images/<doc>/<page>/<file>.png`). The files for the bundled
+corpus are **not** part of this repo, so its figures render as labelled
+placeholders showing the page number, classification and filename. Drop the
+`extracted_images/` folder into the project root and they render inline — see
+SETUP.md.
