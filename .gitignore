@@ -16,6 +16,7 @@ local_cache/
 
 # OS / editors
 .DS_Store
+__MACOSX/
 Thumbs.db
 .vscode/
 .idea/

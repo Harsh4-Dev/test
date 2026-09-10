@@ -9,6 +9,7 @@ own its own scrolling and typography.
 from __future__ import annotations
 
 import base64
+import hashlib
 import html
 import mimetypes
 import re
@@ -191,18 +192,25 @@ html, body, .stApp{
   background:var(--blue-100); color:var(--blue-800); font-weight:550;
   padding:0 .12em; border-radius:2px;
 }
-.chunk-body details{ margin:.2rem 0 0; }
-.chunk-body details summary{
-  cursor:pointer; font-size:.72rem; font-weight:600; color:var(--blue-700);
-  padding:.3rem 0; list-style:none; user-select:none;
+/* block headings that separate text / tables / images / colours / fonts */
+.blk{ margin:1.1rem 0 0; }
+.blk-h{
+  display:flex; align-items:baseline; gap:.45rem;
+  font-size:.7rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--blue-700); padding-bottom:.28rem; margin-bottom:.5rem;
+  border-bottom:1px solid var(--blue-100);
 }
-.chunk-body details summary::-webkit-details-marker{ display:none; }
-.chunk-body details summary::before{ content:"▸ "; }
-.chunk-body details[open] summary::before{ content:"▾ "; }
+.blk-h .n{
+  font-weight:600; letter-spacing:0; text-transform:none;
+  font-size:.68rem; color:var(--muted);
+}
 
 /* tables */
 .tbl-wrap{ margin:.7rem 0; }
-.tbl-cap{ font-size:.66rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:.25rem; }
+.tbl-cap{
+  font-size:.7rem; font-weight:650; color:var(--ink-2); margin-bottom:.3rem;
+}
+.tbl-cap span{ font-weight:400; color:var(--muted); }
 .tbl-scroll{ overflow-x:auto; border:1px solid var(--line); border-radius:9px; }
 .tbl-scroll table{ border-collapse:collapse; width:100%; font-size:.76rem; }
 .tbl-scroll th{
@@ -213,16 +221,55 @@ html, body, .stApp{
 .tbl-scroll tbody tr:nth-child(even){ background:var(--blue-25); }
 
 /* images */
-.img-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:.5rem; margin:.6rem 0; }
+.img-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:.6rem; margin:.6rem 0; }
 .img-frame{ border:1px solid var(--line); border-radius:9px; overflow:hidden; background:#fff; }
-.img-frame .shot{
-  background:repeating-conic-gradient(#F4F7FB 0 25%, #fff 0 50%) 50%/14px 14px;
-  display:flex; align-items:center; justify-content:center; min-height:88px; padding:.3rem;
+.img-frame .lab{
+  font-size:.68rem; font-weight:650; color:var(--ink-2);
+  padding:.32rem .5rem; background:var(--blue-25); border-bottom:1px solid var(--line-2);
 }
-.img-frame img{ max-width:100%; max-height:170px; display:block; }
+.img-frame .lab span{ font-weight:400; color:var(--muted); }
+.img-frame .shot{
+  display:flex;
+  background:repeating-conic-gradient(#F4F7FB 0 25%, #fff 0 50%) 50%/14px 14px;
+  display:flex; align-items:center; justify-content:center; min-height:110px; padding:.4rem;
+}
+.img-frame img{ max-width:100%; max-height:230px; display:block; }
 .img-frame .cap{
-  font-size:.62rem; color:var(--muted); padding:.28rem .4rem;
-  border-top:1px solid var(--line-2); display:flex; justify-content:space-between; gap:.3rem;
+  font-size:.58rem; color:var(--faint); padding:.28rem .5rem;
+  border-top:1px solid var(--line-2); word-break:break-all; line-height:1.3;
+  font-family:ui-monospace,"Cascadia Mono",Menlo,monospace;
+}
+
+/* Click-to-enlarge. A hidden checkbox drives it, so the same <img> element is
+   promoted to a full-screen overlay - no second copy of the data URI, and no
+   JavaScript, which Streamlit strips from markdown anyway. */
+.lb-cb{ position:absolute; width:0; height:0; opacity:0; pointer-events:none; }
+.lb-open{ display:block; cursor:zoom-in; margin:0; }
+/* A sticky column creates its own stacking context, which would otherwise
+   trap the fixed overlay underneath the sidebar (z 999991) and the chat
+   column. Lift the column only while one of its lightboxes is open. */
+div[data-testid="stColumn"]:has(.lb-cb:checked){ z-index:1000000; }
+.lb-cb:checked + .lb-open{
+  position:fixed; inset:0; z-index:2147483000; cursor:zoom-out;
+  background:rgba(9,24,44,.90); padding:4vh 4vw;
+  display:flex; align-items:center; justify-content:center;
+}
+.lb-cb:checked + .lb-open .shot{
+  background:none; min-height:0; padding:0; max-width:100%; max-height:100%;
+}
+.lb-cb:checked + .lb-open img{
+  max-width:92vw; max-height:88vh; border-radius:6px;
+  box-shadow:0 18px 60px rgba(0,0,0,.5); background:#fff;
+}
+.lb-cb:checked + .lb-open::after{
+  content:"\\2715  Close"; position:fixed; top:2.2vh; right:3vw;
+  font-size:.82rem; font-weight:600; color:#fff;
+  background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.35);
+  border-radius:8px; padding:.35rem .7rem;
+}
+.lb-cb:checked + .lb-open::before{
+  content:attr(data-cap); position:fixed; left:0; right:0; bottom:2.2vh;
+  text-align:center; color:#DCE9F8; font-size:.78rem; padding:0 4vw;
 }
 .img-miss{
   min-height:88px; display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -236,10 +283,42 @@ html, body, .stApp{
   font-family:ui-monospace,"Cascadia Mono",Menlo,monospace;
 }
 
-/* swatches */
-.sw-row{ display:flex; flex-wrap:wrap; gap:.3rem; margin:.5rem 0; }
-.sw{ display:flex; align-items:center; gap:.3rem; border:1px solid var(--line); border-radius:999px; padding:.12rem .45rem .12rem .15rem; font-size:.64rem; color:var(--ink-2); }
-.sw i{ width:13px; height:13px; border-radius:50%; border:1px solid rgba(0,0,0,.12); display:block; }
+/* colour swatches */
+.sw-row{ display:flex; flex-wrap:wrap; gap:.35rem; margin:.1rem 0 .2rem; }
+.sw{
+  display:flex; align-items:center; gap:.35rem; border:1px solid var(--line);
+  border-radius:8px; padding:.2rem .5rem .2rem .25rem; font-size:.68rem; color:var(--ink-2);
+  font-family:ui-monospace,"Cascadia Mono",Menlo,monospace;
+}
+.sw i{ width:16px; height:16px; border-radius:4px; border:1px solid rgba(0,0,0,.12); display:block; }
+.sw em{ font-style:normal; color:var(--faint); font-size:.62rem; }
+
+/* fonts */
+.font-row{ display:flex; flex-wrap:wrap; gap:.35rem; margin:.1rem 0 .2rem; }
+.font-pill{
+  border:1px solid var(--line); border-radius:8px; padding:.22rem .55rem;
+  font-size:.72rem; color:var(--ink-2); background:#fff;
+}
+
+/* the show-details drawer at the foot of a card */
+.card-det{ border-top:1px solid var(--line-2); }
+.card-det summary{
+  cursor:pointer; user-select:none; list-style:none;
+  font-size:.72rem; font-weight:650; color:var(--blue-700);
+  padding:.5rem .85rem; background:#fff;
+}
+.card-det summary:hover{ background:var(--blue-25); }
+.card-det summary::-webkit-details-marker{ display:none; }
+.card-det summary::before{ content:"▸  "; }
+.card-det[open] summary::before{ content:"▾  "; }
+.card-det .det-body{
+  padding:.2rem .85rem .8rem; font-size:.76rem; line-height:1.65; color:var(--ink-2);
+  background:#fff;
+}
+.card-det .det-body p{ margin:.3rem 0; }
+.card-det .det-body ol{ margin:.35rem 0; padding-left:1.4rem; }
+.card-det .det-body li{ margin:.3rem 0; }
+.card-det .det-body b{ color:var(--ink); font-weight:600; }
 
 /* per-chunk metrics */
 .mets{ border-top:1px solid var(--line-2); background:var(--blue-25); padding:.55rem .85rem .6rem; }
@@ -287,7 +366,7 @@ div[data-testid="stExpander"] details{
 div[data-testid="stExpander"] summary{ font-size:.78rem; font-weight:550; }
 [data-testid="stMetricValue"]{ font-size:1.05rem; color:var(--blue-700); }
 
-/* the chat bar: keep it over the conversation column, not the report */
+/* the chat bar sits under the conversation column on the right */
 [data-testid="stBottomBlockContainer"]{
   background:linear-gradient(180deg,rgba(255,255,255,0),#fff 22%);
   padding-bottom:1rem;
@@ -297,19 +376,36 @@ div[data-testid="stExpander"] summary{ font-size:.78rem; font-weight:550; }
 [data-testid="stChatInput"]:focus-within{ border-color:var(--blue-500); }
 
 @media (min-width:1200px){
-  [data-testid="stBottomBlockContainer"] > div{ padding-right:41%; }
-  /* Pin the report column so long chunk lists scroll on their own. `top`
-     clears the 60px app header, otherwise the panel heading and the summary
-     metrics hide behind it at scroll top. */
-  div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:last-child{
+  /* The report column is 1.75 of 2.75, so the chat starts at ~64%. */
+  [data-testid="stBottomBlockContainer"] > div{ padding-left:64%; }
+
+  /* Both columns scroll on their own, so the page itself is never taller than
+     the viewport. That matters because Streamlit auto-scrolls the app to the
+     bottom whenever a chat message is added - with a page-height report that
+     would land the reader on the last chunk instead of the best one. */
+  div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]{
     align-self:flex-start; position:sticky; top:4.5rem;
-    max-height:calc(100vh - 6.5rem); overflow-y:auto; overflow-x:hidden;
-    padding-right:.35rem;
+    max-height:calc(100vh - 11rem); overflow-y:auto; overflow-x:hidden;
   }
-  div[data-testid="stColumn"]:last-child::-webkit-scrollbar{ width:7px; }
-  div[data-testid="stColumn"]:last-child::-webkit-scrollbar-thumb{
+  div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child{
+    padding-right:.9rem;
+  }
+  div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]::-webkit-scrollbar{
+    width:8px;
+  }
+  div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]::-webkit-scrollbar-thumb{
     background:var(--line); border-radius:4px;
   }
+  div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:hover::-webkit-scrollbar-thumb{
+    background:#CBD6E4;
+  }
+  /* Guard: a column nested inside one of those must not scroll on its own. */
+  div[data-testid="stColumn"] div[data-testid="stColumn"]{
+    position:static; max-height:none; overflow:visible;
+  }
+  /* The columns reserve their own room for the chat bar, so the page below
+     them needs almost none - this is what stops the app scrolling at all. */
+  .block-container{ padding-bottom:1.5rem; }
 }
 </style>
 """
@@ -372,7 +468,7 @@ def is_table_line(line: str) -> bool:
     return line.lstrip().startswith("|") and line.count("|") >= 2
 
 
-def md_table_to_html(markdown: str, caption: str = "") -> str:
+def md_table_to_html(markdown: str, caption: str = "", escape_caption: bool = True) -> str:
     """Convert one GitHub-flavoured markdown table into a scrollable HTML table."""
     rows = [l for l in markdown.strip().split("\n") if l.strip()]
     if not rows:
@@ -396,7 +492,8 @@ def md_table_to_html(markdown: str, caption: str = "") -> str:
         trs.append("".join(f"<td>{_inline(c)}</td>" for c in row))
     tbody = "".join(f"<tr>{r}</tr>" for r in trs)
 
-    cap = f'<div class="tbl-cap">{esc(caption)}</div>' if caption else ""
+    text = esc(caption) if escape_caption else caption
+    cap = f'<div class="tbl-cap">{text}</div>' if caption else ""
     return (
         f'<div class="tbl-wrap">{cap}<div class="tbl-scroll"><table>'
         f"<thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody>"
@@ -483,7 +580,12 @@ def _implicit_list(lines):
     for line in lines:
         counts[line] = counts.get(line, 0) + 1
     marker, hits = max(counts.items(), key=lambda kv: kv[1])
-    if hits < 2 or not marker[:1].isupper() or len(marker.split()) > 3:
+    # A real repeated label is a word or two ("Do NOT", "Grade"). Placeholder
+    # cell values from a flattened table ("XX", "-") are not, and turning
+    # those into a bullet each makes the chunk far harder to read.
+    if hits < 2 or not marker[:1].isupper() or not (3 <= len(marker) <= 24):
+        return None
+    if len(marker.split()) > 3:
         return None
 
     items, current = [], []
@@ -496,7 +598,13 @@ def _implicit_list(lines):
             current.append(line)
     if current:
         items.append(" ".join(current))
-    return items if len(items) >= 2 else None
+
+    if len(items) < 2:
+        return None
+    # Items that are barely longer than the marker itself are table cells.
+    if sum(len(i) for i in items) / len(items) < len(marker) + 9:
+        return None
+    return items
 
 
 def body_to_html(text: str, terms=()) -> str:
@@ -572,40 +680,8 @@ def body_to_html(text: str, terms=()) -> str:
 
     flush_para()
     flush_bullets()
-    if not out:
-        return "<p>No body text in this section.</p>"
-    return _clamp(out)
-
-
-# Sections longer than this get their tail folded into a <details>. Some
-# chunks run to 1,400+ words of PDF-flattened table text, which buries the
-# next result if it is all rendered inline.
-CLAMP_AFTER_CHARS = 1400
-
-
-def _clamp(blocks) -> str:
-    """Show the opening of a long section, fold the remainder away."""
-    total = sum(len(b) for b in blocks)
-    if total <= CLAMP_AFTER_CHARS or len(blocks) < 3:
-        return "".join(blocks)
-
-    head, running = [], 0
-    for i, block in enumerate(blocks):
-        head.append(block)
-        running += len(block)
-        if running >= CLAMP_AFTER_CHARS * 0.6:
-            rest = blocks[i + 1:]
-            break
-    else:
-        return "".join(blocks)
-
-    if not rest:
-        return "".join(head)
-    return (
-        "".join(head)
-        + f"<details><summary>Show the rest of this section "
-        f"({len(rest)} more block(s))</summary>{''.join(rest)}</details>"
-    )
+    # The whole chunk is always rendered - no truncation, no "show more".
+    return "".join(out) or "<p>No body text in this section.</p>"
 
 
 # ---------------------------------------------------------------------------
@@ -633,56 +709,108 @@ def _data_uri(path: Path):
         return None
 
 
-def images_to_html(images) -> str:
-    """Render the section's figures as a grid of framed thumbnails.
+def images_to_html(images, scope: str = "") -> str:
+    """Render the section's figures, each labelled with its own metadata.
 
-    Files that were never shipped alongside the JSONL fall back to a
-    placeholder that still names the page and the source path.
+    A resolved image is wrapped in a checkbox-driven lightbox so clicking it
+    opens it full screen. Files that were never shipped alongside the JSONL
+    fall back to a placeholder naming the page, classification and path.
     """
     if not images:
         return ""
     shown = images[:MAX_IMAGES_PER_CHUNK]
     cards = []
-    for img in shown:
+    for n, img in enumerate(shown, start=1):
         page = img.get("page_number", "?")
         kind = img.get("classification", "figure")
-        path = resolve_image(img.get("local_path", ""))
+        local = str(img.get("local_path", "") or "unknown")
+        label = (
+            f'<div class="lab">Image {n} '
+            f"<span>&middot; page {esc(page)} &middot; {esc(kind)}</span></div>"
+        )
+        path = resolve_image(local)
         uri = _data_uri(path) if path else None
         if uri:
-            cards.append(
-                f'<figure class="img-frame"><div class="shot">'
-                f'<img src="{uri}" alt="Figure from page {esc(page)}" loading="lazy"></div>'
-                f'<figcaption class="cap"><span>p. {esc(page)}</span>'
-                f"<span>{esc(kind)}</span></figcaption></figure>"
+            uid = "lb" + hashlib.md5(f"{scope}|{local}|{n}".encode()).hexdigest()[:10]
+            caption = f"Image {n} - page {page} - {kind} - {Path(local).name}"
+            body = (
+                f'<input class="lb-cb" type="checkbox" id="{uid}">'
+                f'<label class="lb-open" for="{uid}" data-cap="{esc(caption)}">'
+                f'<span class="shot">'
+                f'<img src="{uri}" alt="Image {n} from page {esc(page)}" loading="lazy">'
+                f"</span></label>"
             )
         else:
-            name = Path(str(img.get("local_path", "unknown"))).name
-            cards.append(
-                f'<div class="img-frame"><div class="img-miss">'
-                f'<span class="ic">&#128443;</span>'
-                f'<span class="t">Figure on p. {esc(page)} &middot; {esc(kind)}</span>'
-                f'<span class="f">{esc(name)}</span></div>'
-                f'<div class="cap"><span>not bundled</span>'
-                f"<span>{esc(kind)}</span></div></div>"
+            body = (
+                f'<div class="img-miss"><span class="ic">&#128443;</span>'
+                f'<span class="t">Not bundled with this repo</span>'
+                f'<span class="f">{esc(Path(local).name)}</span></div>'
             )
+        cards.append(
+            f'<figure class="img-frame">{label}{body}'
+            f'<figcaption class="cap">{esc(local)}</figcaption></figure>'
+        )
+
     extra = len(images) - len(shown)
-    more = f'<div class="note">{extra} further figure(s) in this section not shown.</div>' if extra > 0 else ""
-    return f'<div class="img-grid">{"".join(cards)}</div>{more}'
+    more = (
+        f'<div class="note">{extra} further image(s) in this section not shown.</div>'
+        if extra > 0 else ""
+    )
+    return (
+        f'<div class="blk"><div class="blk-h">Images'
+        f'<span class="n">{len(images)} in this chunk</span></div>'
+        f'<div class="img-grid">{"".join(cards)}</div>{more}</div>'
+    )
+
+
+def tables_to_html(tables) -> str:
+    """Each table gets its own heading and page reference."""
+    usable = [t for t in tables if (t.get("markdown") or "").strip()]
+    if not usable:
+        return ""
+    blocks = []
+    for n, tbl in enumerate(usable, start=1):
+        caption = f"Table {n} <span>&middot; page {esc(tbl.get('page_number', '?'))}</span>"
+        blocks.append(md_table_to_html(tbl["markdown"], caption, escape_caption=False))
+    return (
+        f'<div class="blk"><div class="blk-h">Tables'
+        f'<span class="n">{len(usable)} in this chunk</span></div>'
+        f'{"".join(blocks)}</div>'
+    )
 
 
 def swatches_to_html(swatches) -> str:
+    """Colour swatches, under an explicit label."""
     if not swatches:
         return ""
     chips = []
-    for item in swatches[:14]:
+    for item in swatches[:24]:
         if isinstance(item, (list, tuple)) and item:
             hex_code, count = str(item[0]), (item[1] if len(item) > 1 else "")
         else:
             hex_code, count = str(item), ""
         safe = hex_code if re.fullmatch(r"#[0-9A-Fa-f]{3,8}", hex_code) else "#CCCCCC"
-        label = f"{esc(hex_code)}" + (f" &middot; {esc(count)}" if count != "" else "")
-        chips.append(f'<span class="sw"><i style="background:{safe}"></i>{label}</span>')
-    return f'<div class="sw-row">{"".join(chips)}</div>'
+        tail = f"<em>&times;{esc(count)}</em>" if count != "" else ""
+        chips.append(
+            f'<span class="sw"><i style="background:{safe}"></i>{esc(hex_code)}{tail}</span>'
+        )
+    return (
+        f'<div class="blk"><div class="blk-h">Colours'
+        f'<span class="n">{len(swatches)} swatch(es), with pixel counts</span></div>'
+        f'<div class="sw-row">{"".join(chips)}</div></div>'
+    )
+
+
+def fonts_to_html(fonts) -> str:
+    """The `fonts_present` list from the JSONL."""
+    if not fonts:
+        return ""
+    pills = "".join(f'<span class="font-pill">{esc(f)}</span>' for f in fonts)
+    return (
+        f'<div class="blk"><div class="blk-h">Fonts'
+        f'<span class="n">{len(fonts)} from <code>fonts_present</code></span></div>'
+        f'<div class="font-row">{pills}</div></div>'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -744,26 +872,74 @@ def summary_html(metrics: dict, timings: dict) -> str:
 # The chunk card
 # ---------------------------------------------------------------------------
 
+def _pages_sentence(sec) -> str:
+    if not sec.has_pages:
+        return ""
+    if sec.page_start == sec.page_end:
+        located = f"This content is located on page {sec.page_start}."
+    else:
+        located = (
+            f"This content is located on pages {sec.page_start} to {sec.page_end}."
+        )
+    if sec.source_pages:
+        covered = ", ".join(str(p) for p in sec.source_pages)
+        located += (
+            f" The specific source page numbers covered are: {esc(covered)}."
+        )
+    return f"<p>{located}</p>"
+
+
+def details_prose_html(sec) -> str:
+    """The provenance drawer at the foot of a card, written out in prose."""
+    parts = [f'<p>It belongs to the section titled "<b>{esc(sec.section_label)}</b>".</p>']
+
+    pages = _pages_sentence(sec)
+    if pages:
+        parts.append(pages)
+
+    if sec.document_id:
+        parts.append(f"<p>It comes from the document <b>{esc(sec.document_id)}</b>.</p>")
+
+    if sec.matched_fields:
+        fields = ", ".join(esc(f) for f in sec.matched_fields)
+        parts.append(
+            f"<p>The fields that were matched for this chunk are: {fields}.</p>"
+        )
+
+    rows = [d for d in sec.field_match_details if isinstance(d, dict)]
+    if rows:
+        items = []
+        for d in rows:
+            name = esc(d.get("field", "unnamed"))
+            group = esc(d.get("attribute_group", "an unnamed group"))
+            score = d.get("score")
+            reason = esc(d.get("selection_reason", "unspecified"))
+            score_txt = (
+                f"{float(score):.4f}" if isinstance(score, (int, float)) else esc(score)
+            )
+            items.append(
+                f'<li>The field "<b>{name}</b>" belongs to the attribute group '
+                f'"{group}". It was matched with a relevance score of {score_txt}, '
+                f'and the reason for selecting it was "{reason}".</li>'
+            )
+        parts.append("<p>Details about how each field was matched:</p>")
+        parts.append(f'<ol>{"".join(items)}</ol>')
+
+    parts.append(
+        f"<p>Chunk id: <b>{esc(sec.chunk_id)}</b> &middot; {sec.word_count} words"
+        f" &middot; {len(sec.tables)} table(s) &middot; {len(sec.images)} image(s).</p>"
+    )
+
+    return (
+        f'<details class="card-det"><summary>Show details</summary>'
+        f'<div class="det-body">{"".join(parts)}</div></details>'
+    )
+
+
 def chunk_card_html(hit) -> str:
+    """One retrieved chunk: its text in full, then its media, then provenance."""
     sec = hit.section
     terms = hit.matched_terms
-
-    chips = []
-    if sec.page_label:
-        chips.append(f'<span class="chip">{esc(sec.page_label)}</span>')
-    if sec.tables:
-        chips.append(f'<span class="chip n">{len(sec.tables)} table(s)</span>')
-    if sec.images:
-        chips.append(f'<span class="chip n">{len(sec.images)} figure(s)</span>')
-    chips.append(f'<span class="chip n">{sec.word_count} words</span>')
-    for f in sec.matched_fields[:4]:
-        chips.append(f'<span class="chip">{esc(f)}</span>')
-
-    tables_html = "".join(
-        md_table_to_html(t.get("markdown", ""), f"Table &middot; page {t.get('page_number', '?')}")
-        for t in sec.tables
-        if (t.get("markdown") or "").strip()
-    )
 
     return (
         f'<div class="chunk">'
@@ -773,13 +949,14 @@ def chunk_card_html(hit) -> str:
         f'<div class="path">{esc(sec.chunk_id)}</div></div>'
         f'<div class="chunk-score"><b>{pct(hit.relevance)}</b><span>relevance</span></div>'
         f"</div>"
-        f'<div class="chip-row">{"".join(chips)}</div>'
         f'<div class="chunk-body">'
         f"{body_to_html(sec.text, terms)}"
-        f"{tables_html}"
-        f"{images_to_html(sec.images)}"
+        f"{tables_to_html(sec.tables)}"
+        f"{images_to_html(sec.images, sec.chunk_id)}"
         f"{swatches_to_html(sec.color_swatches)}"
+        f"{fonts_to_html(sec.fonts_present)}"
         f"</div>"
+        f"{details_prose_html(sec)}"
         f"{hit_metrics_html(hit)}"
         f"</div>"
     )

@@ -21,9 +21,11 @@ query ─► bge-small embedding ─┬─► Chroma (cosine, HNSW) ─┐
 - **Parent-section rollup** — long sections are indexed as overlapping
   passages so nothing overflows the embedder's context, then rolled back up so
   you read whole sections, not fragments.
-- **A readable report** — each retrieved chunk renders with its markdown
-  tables as real tables, its figures as framed thumbnails, its colour swatches
-  as chips, and its retrieval metrics underneath.
+- **A readable report** — the retrieved chunks are the main column. Each one
+  shows its full `chunk_text`, then its markdown tables as real tables, its
+  figures inline, its colour swatches and the fonts the page used, then its
+  retrieval metrics, then a **Show details** drawer with the chunk's
+  provenance (pages covered, matched fields and how each was scored).
 
 ## Any dataset
 
@@ -127,8 +129,10 @@ Full instructions, including free-tier deployment, are in [SETUP.md](SETUP.md).
 ## Figures
 
 A corpus can reference extracted images by relative path
-(`extracted_images/<doc>/<page>/<file>.png`). The files for the bundled
-corpus are **not** part of this repo, so its figures render as labelled
-placeholders showing the page number, classification and filename. Drop the
-`extracted_images/` folder into the project root and they render inline — see
-SETUP.md.
+(`extracted_images/<doc>/<page>/<file>.png`), resolved against the project
+root (also `dataset/` and `assets/`). The bundled corpus ships its
+`extracted_images/` folder, so all 72 of its figures render inline, each
+labelled with its page number, classification and source path.
+
+Any image a corpus references but does not ship falls back to a labelled
+placeholder rather than breaking the card — see SETUP.md.

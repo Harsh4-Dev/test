@@ -75,6 +75,7 @@ plan.
 - `app.py`, `rag_core.py`, `ui.py`
 - `requirements.txt`
 - everything in `dataset/` you want available in the deployed app
+- `extracted_images/`, if your corpus references figures
 - `.streamlit/config.toml`
 
 `.chroma/` is gitignored on purpose. The cloud container rebuilds it on first
@@ -122,18 +123,18 @@ does, the install will likely blow the free tier's memory and disk.
 
 ---
 
-## 4. Optional: render the figures
+## 4. Figures
 
-The dataset points at images by relative path, e.g.
+A corpus points at images by relative path, e.g.
 
 ```
 extracted_images/POLIVY_GLOBAL_BRAND_BOOK_Q1_2026_1/p014/pymupdf_vector_render_ba447c625c.png
 ```
 
-Those files aren't in the repo, so figures currently render as labelled
-placeholders. To render them for real, copy the `extracted_images/` folder into
-the project root, so paths resolve as
-`<project root>/extracted_images/...`, then commit it.
+`extracted_images/` is committed (about 13 MB), so the bundled corpus renders
+all of its figures inline. For a new corpus, copy its image folder into the
+project root so paths resolve as `<project root>/<local_path>`, and commit it.
+Anything missing degrades to a labelled placeholder instead of breaking.
 
 `ui.py` also looks under `dataset/` and `assets/`, so any of these work:
 
