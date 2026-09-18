@@ -519,7 +519,7 @@ class RagEngine:
         pretty = re.sub(r"\s+", " ", pretty)
         return pretty.title() if pretty.islower() or pretty.isupper() else pretty
 
-    def suggested_queries(self, limit: int = 6) -> list:
+    def suggested_queries(self, limit: int = 10) -> list:
         """Seed the UI with real headings from whichever corpus loaded.
 
         Corpora with no titles get a placeholder label ("Section 4"), which
